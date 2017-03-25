@@ -25,15 +25,22 @@ type boardIndex struct {
 type board struct {
 	row, column int
 	grid        []byte
-	validBoard  *boardIndex
+	validBoards *boardIndex
 }
 
-var wg sync.WaitGroup
-
 func main() {
-	for _, input := range readInput() {
-		work(input)
-		fmt.Printf("%d\n", len(input.validBoard.index)-1) // -1 because we don't count the 'input' board
+	inputsBoard := readInput()
+	var wg sync.WaitGroup
+	wg.Add(len(inputsBoard))
+	for _, input := range inputsBoard {
+		go func(b *board) {
+			defer wg.Done()
+			b.work()
+		}(input)
+	}
+	wg.Wait()
+	for _, input := range inputsBoard {
+		fmt.Printf("%d\n", len(input.validBoards.index)-1)
 	}
 }
 
@@ -52,7 +59,7 @@ func readInput() []*board {
 				b.grid[l*b.column+c] = line[c]
 			}
 		}
-		b.validBoard = &boardIndex{index: map[string]struct{}{}}
+		b.validBoards = &boardIndex{index: map[string]struct{}{}}
 		testCases = append(testCases, &b)
 	}
 	return testCases
@@ -76,6 +83,8 @@ nextDir:
 				return false
 			case '#', '0':
 				continue nextDir
+			case '.':
+				q.board.set(r, c, 'x') // later no need to try that cell with a queen
 			}
 		}
 	}
@@ -88,6 +97,10 @@ func (b *board) get(row, column int) byte {
 		return '0'
 	}
 	return b.grid[column+row*b.column]
+}
+
+func (b *board) set(row, column int, v byte) {
+	b.grid[column+row*b.column] = v
 }
 
 func (b *board) in(row, column int) bool {
@@ -106,12 +119,11 @@ func (b *board) validate() bool {
 	}
 	return true
 }
+
 func (b *board) clone() *board {
 	newBoard := *b
 	newBoard.grid = make([]byte, len(b.grid))
-	for k, v := range b.grid {
-		newBoard.grid[k] = v
-	}
+	copy(newBoard.grid, b.grid)
 	return &newBoard
 }
 
@@ -121,7 +133,6 @@ func (b *board) generateNext(children chan<- *board) {
 		if c == '.' {
 			newboard := b.clone()
 			newboard.grid[i] = 'Q'
-			wg.Add(1)
 			children <- newboard
 		}
 	}
@@ -129,30 +140,27 @@ func (b *board) generateNext(children chan<- *board) {
 }
 
 func (b *board) addToValidBoard() bool {
-	b.validBoard.Lock()
-	if _, ok := b.validBoard.index[string(b.grid)]; ok {
-		b.validBoard.Unlock()
+	b.validBoards.Lock()
+	if _, ok := b.validBoards.index[string(b.grid)]; ok {
+		b.validBoards.Unlock()
 		return false
 	}
-	b.validBoard.index[string(b.grid)] = struct{}{}
-	b.validBoard.Unlock()
+	b.validBoards.index[string(b.grid)] = struct{}{}
+	b.validBoards.Unlock()
 	return true
 }
 
-func work(b *board) {
-	if !b.validate() {
+func (b *board) work() {
+	if !b.validate() || !b.addToValidBoard() {
 		return
 	}
-	if !b.addToValidBoard() {
-		return // already known board
-	}
 
-	children := make(chan *board, 10)
+	children := make(chan *board, b.row*b.column/3) // dynamic sizing of buffered chan
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() { // work on children in parallel using goroutine
 		for child := range children {
-			work(child)
+			child.work()
 		}
 		wg.Done()
 	}()
