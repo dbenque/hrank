@@ -26,6 +26,7 @@ type board struct {
 	row, column int
 	grid        []byte
 	validBoards *boardIndex
+	wgChildren  *sync.WaitGroup
 }
 
 func main() {
@@ -33,13 +34,16 @@ func main() {
 	var wg sync.WaitGroup
 	wg.Add(len(inputsBoard))
 	for _, input := range inputsBoard {
+		input.wgChildren.Add(1) // for the initial board
 		go func(b *board) {
 			defer wg.Done()
 			b.work()
 		}(input)
 	}
 	wg.Wait()
+
 	for _, input := range inputsBoard {
+		input.wgChildren.Wait()
 		fmt.Printf("%d\n", len(input.validBoards.index)-1)
 	}
 }
@@ -60,6 +64,7 @@ func readInput() []*board {
 			}
 		}
 		b.validBoards = &boardIndex{index: map[string]struct{}{}}
+		b.wgChildren = &sync.WaitGroup{}
 		testCases = append(testCases, &b)
 	}
 	return testCases
@@ -133,6 +138,7 @@ func (b *board) generateNext(children chan<- *board) {
 		if c == '.' {
 			newboard := b.clone()
 			newboard.grid[i] = 'Q'
+			b.wgChildren.Add(1)
 			children <- newboard
 		}
 	}
@@ -151,19 +157,21 @@ func (b *board) addToValidBoard() bool {
 }
 
 func (b *board) work() {
+	defer b.wgChildren.Done()
 	if !b.validate() || !b.addToValidBoard() {
 		return
 	}
 
-	children := make(chan *board, b.row*b.column/3) // dynamic sizing of buffered chan
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() { // work on children in parallel using goroutine
-		for child := range children {
-			child.work()
+	children := make(chan *board, b.row*b.column/4) // dynamic sizing of buffered chan
+	go b.generateNext(children)
+childLoop:
+	for {
+		select {
+		case child, ok := <-children:
+			if !ok {
+				break childLoop
+			}
+			go child.work()
 		}
-		wg.Done()
-	}()
-	b.generateNext(children)
-	wg.Wait()
+	}
 }

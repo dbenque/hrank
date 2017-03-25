@@ -1,6 +1,7 @@
 package main
 
 import "testing"
+import "sync"
 
 func BenchmarkWork(b *testing.B) {
 	r, c := 8, 8
@@ -15,10 +16,13 @@ func BenchmarkWork(b *testing.B) {
 			column:      c,
 			grid:        make([]byte, c*r),
 			validBoards: &boardIndex{index: map[string]struct{}{}},
+			wgChildren:  &sync.WaitGroup{},
 		}
 		for i := range b.grid {
 			b.grid[i] = '.'
 		}
+		b.wgChildren.Add(1)
 		b.work()
+		b.wgChildren.Wait()
 	}
 }
