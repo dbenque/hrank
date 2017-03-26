@@ -8,14 +8,17 @@ type direction [2]int
 var allDirections []direction
 
 func init() {
-	allDirections = []direction{}
-	for _, r := range []int{-1, 0, 1} {
-		for _, c := range []int{-1, 0, 1} {
-			if r != 0 || c != 0 {
-				allDirections = append(allDirections, direction{r, c})
-			}
-		}
+	allDirections = []direction{
+		{-1, 0}, {-1, -1}, {0, -1}, {1, 0}, {0, 1}, {1, 1}, {-1, 1}, {1, -1}, // optimized order to first find collision before marking path
 	}
+
+	// for _, r := range []int{-1, 0, 1} {
+	// 	for _, c := range []int{-1, 0, 1} {
+	// 		if r != 0 || c != 0 {
+	// 			allDirections = append(allDirections, direction{r, c})
+	// 		}
+	// 	}
+	// }
 }
 
 type boardIndex struct {
@@ -26,7 +29,7 @@ type board struct {
 	row, column int
 	grid        []byte
 	validBoards *boardIndex
-	wgChildren  *sync.WaitGroup
+	allBoards   *boardIndex
 }
 
 func main() {
@@ -34,17 +37,15 @@ func main() {
 	var wg sync.WaitGroup
 	wg.Add(len(inputsBoard))
 	for _, input := range inputsBoard {
-		input.wgChildren.Add(1) // for the initial board
 		go func(b *board) {
 			defer wg.Done()
-			b.work()
+			b.work2()
 		}(input)
 	}
 	wg.Wait()
 
 	for _, input := range inputsBoard {
-		input.wgChildren.Wait()
-		fmt.Printf("%d\n", len(input.validBoards.index)-1)
+		fmt.Printf("%d\n", len(input.validBoards.index))
 	}
 }
 
@@ -64,7 +65,7 @@ func readInput() []*board {
 			}
 		}
 		b.validBoards = &boardIndex{index: map[string]struct{}{}}
-		b.wgChildren = &sync.WaitGroup{}
+		b.allBoards = &boardIndex{index: map[string]struct{}{}}
 		testCases = append(testCases, &b)
 	}
 	return testCases
@@ -72,28 +73,28 @@ func readInput() []*board {
 
 type queen struct {
 	row, column int
-	board       *board
 }
 
 //walk in the given directions and return true if no other queen was meet
-func (q *queen) walk(d []direction) bool {
+func (q *queen) walk(d []direction, b *board) bool {
+	ret := true
 nextDir:
 	for _, dir := range d {
 		r, c := q.row, q.column
 		for {
 			r += dir[0]
 			c += dir[1]
-			switch q.board.get(r, c) {
+			switch b.get(r, c) {
 			case 'Q':
-				return false
+				ret = false
 			case '#', '0':
 				continue nextDir
 			case '.':
-				q.board.set(r, c, 'x') // later no need to try that cell with a queen
+				b.set(r, c, 'x') // later no need to try that cell with a queen
 			}
 		}
 	}
-	return true
+	return ret
 }
 
 //return the content of the cell or 0 if coordinate are out of the board
@@ -116,8 +117,8 @@ func (b *board) in(row, column int) bool {
 func (b *board) validate() bool {
 	for i, c := range b.grid {
 		if c == 'Q' {
-			q := queen{row: i / b.column, column: i % b.column, board: b}
-			if !q.walk(allDirections) {
+			q := queen{row: i / b.column, column: i % b.column}
+			if !q.walk(allDirections, b) {
 				return false
 			}
 		}
@@ -138,7 +139,6 @@ func (b *board) generateNext(children chan<- *board) {
 		if c == '.' {
 			newboard := b.clone()
 			newboard.grid[i] = 'Q'
-			b.wgChildren.Add(1)
 			children <- newboard
 		}
 	}
@@ -156,8 +156,22 @@ func (b *board) addToValidBoard() bool {
 	return true
 }
 
+//return true if that board has never beeb seen before
+func (b *board) addToAllBoard() bool {
+	b.allBoards.Lock()
+	if _, ok := b.allBoards.index[string(b.grid)]; ok {
+		b.allBoards.Unlock()
+		return false
+	}
+	b.allBoards.index[string(b.grid)] = struct{}{}
+	b.allBoards.Unlock()
+	return true
+}
+
 func (b *board) work() {
-	defer b.wgChildren.Done()
+	if !b.addToAllBoard() {
+		return
+	}
 	if !b.validate() || !b.addToValidBoard() {
 		return
 	}
@@ -171,7 +185,29 @@ childLoop:
 			if !ok {
 				break childLoop
 			}
-			go child.work()
+			child.work()
+		}
+	}
+}
+
+//-----------------------
+func (b *board) work2() {
+	for i, c := range b.grid {
+		if c == '.' {
+			b.grid[i] = 'Q'
+			if !b.addToAllBoard() { // check if that board was already seen
+				b.grid[i] = '.'
+				continue
+			}
+			newboard := b.clone() // the one with clean signature (without the x)
+			b.grid[i] = '.'
+
+			q := queen{row: i / b.column, column: i % b.column}
+			if !q.walk(allDirections, newboard) {
+				continue
+			}
+			newboard.addToValidBoard()
+			newboard.work2()
 		}
 	}
 }
