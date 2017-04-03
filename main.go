@@ -11,25 +11,12 @@ func init() {
 	allDirections = []direction{
 		{-1, 0}, {-1, -1}, {0, -1}, {1, 0}, {0, 1}, {1, 1}, {-1, 1}, {1, -1}, // optimized order to first find collision before marking path
 	}
-
-	// for _, r := range []int{-1, 0, 1} {
-	// 	for _, c := range []int{-1, 0, 1} {
-	// 		if r != 0 || c != 0 {
-	// 			allDirections = append(allDirections, direction{r, c})
-	// 		}
-	// 	}
-	// }
 }
 
-type boardIndex struct {
-	sync.Mutex
-	index map[string]struct{}
-}
 type board struct {
 	row, column int
 	grid        []byte
-	validBoards *boardIndex
-	allBoards   *boardIndex
+	validBoards map[string]struct{}
 }
 
 func main() {
@@ -39,13 +26,13 @@ func main() {
 	for _, input := range inputsBoard {
 		go func(b *board) {
 			defer wg.Done()
-			b.work2()
+			b.work()
 		}(input)
 	}
 	wg.Wait()
 
 	for _, input := range inputsBoard {
-		fmt.Printf("%d\n", len(input.validBoards.index))
+		fmt.Printf("%d\n", len(input.validBoards))
 	}
 }
 
@@ -64,8 +51,8 @@ func readInput() []*board {
 				b.grid[l*b.column+c] = line[c]
 			}
 		}
-		b.validBoards = &boardIndex{index: map[string]struct{}{}}
-		b.allBoards = &boardIndex{index: map[string]struct{}{}}
+		b.validBoards = map[string]struct{}{}
+		//		b.allBoards = map[string]struct{}{}
 		testCases = append(testCases, &b)
 	}
 	return testCases
@@ -146,68 +133,25 @@ func (b *board) generateNext(children chan<- *board) {
 }
 
 func (b *board) addToValidBoard() bool {
-	b.validBoards.Lock()
-	if _, ok := b.validBoards.index[string(b.grid)]; ok {
-		b.validBoards.Unlock()
+	if _, ok := b.validBoards[string(b.grid)]; ok {
 		return false
 	}
-	b.validBoards.index[string(b.grid)] = struct{}{}
-	b.validBoards.Unlock()
-	return true
-}
-
-//return true if that board has never beeb seen before
-func (b *board) addToAllBoard() bool {
-	b.allBoards.Lock()
-	if _, ok := b.allBoards.index[string(b.grid)]; ok {
-		b.allBoards.Unlock()
-		return false
-	}
-	b.allBoards.index[string(b.grid)] = struct{}{}
-	b.allBoards.Unlock()
+	b.validBoards[string(b.grid)] = struct{}{}
 	return true
 }
 
 func (b *board) work() {
-	if !b.addToAllBoard() {
-		return
-	}
-	if !b.validate() || !b.addToValidBoard() {
-		return
-	}
-
-	children := make(chan *board, b.row*b.column/4) // dynamic sizing of buffered chan
-	go b.generateNext(children)
-childLoop:
-	for {
-		select {
-		case child, ok := <-children:
-			if !ok {
-				break childLoop
-			}
-			child.work()
-		}
-	}
-}
-
-//-----------------------
-func (b *board) work2() {
 	for i, c := range b.grid {
 		if c == '.' {
-			b.grid[i] = 'Q'
-			if !b.addToAllBoard() { // check if that board was already seen
-				b.grid[i] = '.'
-				continue
-			}
-			newboard := b.clone() // the one with clean signature (without the x)
-			b.grid[i] = '.'
-
+			newboard := b.clone()
+			newboard.grid[i] = 'Q'
 			q := queen{row: i / b.column, column: i % b.column}
-			if !q.walk(allDirections, newboard) {
-				continue
+			if ok := q.walk(allDirections, newboard); ok {
+				if newboard.addToValidBoard() {
+					newboard.work()
+				}
 			}
-			newboard.addToValidBoard()
-			newboard.work2()
+
 		}
 	}
 }
