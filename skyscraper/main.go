@@ -15,7 +15,6 @@ func (s *stack) Push(v *sky) {
 }
 
 func (s *stack) Pop() (*sky, int32) {
-
 	l := len(*s)
 	if l == 0 {
 		return nil, -1
@@ -30,29 +29,23 @@ func (s *stack) Len() int32 {
 }
 
 func main() {
-	var n, i, count int32
+	var count int64
+	var n, i int32
 	fmt.Scanf("%d", &n)
 	land := stack{}
 	var h, previous, l int32
 building:
 	for i = 0; i < n; i++ {
 		fmt.Scanf("%d", &h)
-		if h < previous || land.Len() == 0 {
+		switch {
+		case h < previous, land.Len() == 0:
 			land.Push(&sky{route: 0, height: h})
-			previous = h
-			continue
-		}
-
-		if previous == h {
+		case previous == h:
 			sk, _ := land.Pop()
 			sk.route++
-			count += sk.route
+			count += int64(sk.route)
 			land.Push(sk)
-			previous = h
-			continue
-		}
-
-		if h > previous {
+		case h > previous:
 			sk := &sky{route: 0, height: -1}
 			for sk.height < h {
 				sk, l = land.Pop()
@@ -65,13 +58,15 @@ building:
 			if sk.height == h {
 				sk.route++
 				land.Push(sk)
-				count += sk.route
+				count += int64(sk.route)
 			} else {
+				if sk.height != -1 {
+					land.Push(sk)
+				}
 				land.Push(&sky{route: 0, height: h})
 			}
-			previous = h
 		}
+		previous = h
 	}
-
 	fmt.Printf("%d", 2*count)
 }
